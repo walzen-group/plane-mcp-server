@@ -14,7 +14,7 @@ from plane_mcp.auth import (
     resolve_config_url,
 )
 from plane_mcp.instructions import SERVER_INSTRUCTIONS
-from plane_mcp.middleware import PlaneLoggingMiddleware
+from plane_mcp.middleware import CoerceArguments, PlaneLoggingMiddleware, ValidateActionArguments
 from plane_mcp.storage import build_token_store
 from plane_mcp.tools import register_tools
 
@@ -53,6 +53,15 @@ def get_allowed_client_redirect_uris() -> list[str]:
     return allowed
 
 
+def _configured(mcp: FastMCP) -> FastMCP:
+    """The middleware stack and tools every transport shares."""
+    mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
+    mcp.add_middleware(CoerceArguments())
+    mcp.add_middleware(ValidateActionArguments())
+    register_tools(mcp)
+    return mcp
+
+
 def _public_base_url() -> str:
     """Public HTTPS base URL of this server (no trailing slash), per CONTRACT §A.
 
@@ -80,9 +89,7 @@ def get_oauth_mcp(base_path: str = "/") -> FastMCP:
             allowed_client_redirect_uris=get_allowed_client_redirect_uris(),
         ),
     )
-    oauth_mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
-    register_tools(oauth_mcp)
-    return oauth_mcp
+    return _configured(oauth_mcp)
 
 
 def get_authentik_oauth_mcp(base_path: str = "/") -> FastMCP:
@@ -94,7 +101,6 @@ def get_authentik_oauth_mcp(base_path: str = "/") -> FastMCP:
     root public URL so OIDC discovery does not 404 under the mount path.
     """
     public_base = _public_base_url()
-    jwt_signing_key = os.getenv("MCP_JWT_SIGNING_KEY") or None
 
     authentik_mcp = FastMCP(
         "Plane MCP Server",
@@ -110,14 +116,12 @@ def get_authentik_oauth_mcp(base_path: str = "/") -> FastMCP:
             issuer_url=public_base,
             required_scopes=["openid", "email", "profile", "offline_access"],
             client_storage=build_token_store(),
-            jwt_signing_key=jwt_signing_key,
+            jwt_signing_key=os.getenv("MCP_JWT_SIGNING_KEY") or None,
             require_authorization_consent=True,
             enable_cimd=False,
         ),
     )
-    authentik_mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
-    register_tools(authentik_mcp)
-    return authentik_mcp
+    return _configured(authentik_mcp)
 
 
 def get_header_mcp():
@@ -128,9 +132,7 @@ def get_header_mcp():
             required_scopes=["read", "write"],
         ),
     )
-    header_mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
-    register_tools(header_mcp)
-    return header_mcp
+    return _configured(header_mcp)
 
 
 def get_stdio_mcp():
@@ -138,6 +140,4 @@ def get_stdio_mcp():
         "Plane MCP Server (stdio)",
         instructions=SERVER_INSTRUCTIONS,
     )
-    stdio_mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
-    register_tools(stdio_mcp)
-    return stdio_mcp
+    return _configured(stdio_mcp)
