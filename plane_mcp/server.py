@@ -115,7 +115,7 @@ def get_authentik_oauth_mcp(base_path: str = "/") -> FastMCP:
             enable_cimd=False,
         ),
     )
-    authentik_mcp.add_middleware(StructuredLoggingMiddleware(include_payloads=True))
+    authentik_mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
     register_tools(authentik_mcp)
     return authentik_mcp
 
