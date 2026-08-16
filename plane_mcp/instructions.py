@@ -1,4 +1,11 @@
 SERVER_INSTRUCTIONS = """
+## Workspaces
+
+Tools act on one workspace at a time. On OAuth/SSO connections each user has their
+own active workspace: call get_active_workspace to see it, and set_active_workspace
+to switch (their token spans every workspace they belong to). If the user mentions a
+workspace that isn't the active one, switch first rather than guessing.
+
 ## Epics
 
 There are no epic tools — an epic is a work item whose type is named "Epic". Work

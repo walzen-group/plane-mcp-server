@@ -47,6 +47,22 @@ def plane_pat_create_url() -> str:
     return f"{web}/settings/profile/api-tokens/" if web else ""
 
 
+def get_authenticated_sub() -> str | None:
+    """Return the verified OIDC subject for this request, or None.
+
+    Only ``authentik_oidc`` requests carry a per-user identity that the PAT store
+    is keyed by. stdio, header/PAT and legacy Plane-Cloud OAuth requests have no
+    such per-user mapping, so they return None.
+    """
+    stored_access_token: AccessToken | None = get_access_token()
+    if not stored_access_token:
+        return None
+    claims = stored_access_token.claims
+    if claims.get("auth_method") != "authentik_oidc":
+        return None
+    return claims.get("sub") or None
+
+
 def get_plane_client_context() -> PlaneClientContext:
     """
     Initialize and return a PlaneClient instance with workspace context.

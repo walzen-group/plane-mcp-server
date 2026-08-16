@@ -124,6 +124,20 @@ https://mcp.example.com/http/provision
 3. Done — Plane tools now act as **you** in Plane. You can revisit the page to change the workspace or
    **Disconnect**.
 
+### Working across several workspaces
+
+A Plane Personal Access Token authenticates a *user*, not a workspace, so the one PAT you linked
+already reaches **every workspace you're a member of**. Each user has their own active workspace:
+
+- `get_active_workspace` — show which workspace tools currently act on.
+- `set_active_workspace(workspace_slug)` — switch to another workspace you belong to. Membership is
+  verified with your own token before the change is saved, it persists across conversations, and it
+  affects **only you**.
+
+Just ask in chat ("switch to the acme workspace"). The provision page's workspace field sets the same
+value. On stdio and header/API-key connections the workspace stays fixed to `PLANE_WORKSPACE_SLUG` /
+the `x-workspace-slug` header, and `set_active_workspace` reports that it can't be switched.
+
 ---
 
 ## How it works (one paragraph)
