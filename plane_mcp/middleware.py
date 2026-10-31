@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection
+from typing import Any
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.server.middleware.logging import StructuredLoggingMiddleware
@@ -10,9 +11,14 @@ from fastmcp.tools.tool import ToolResult
 from fastmcp.utilities.logging import get_logger
 
 from plane_mcp.coercion import coerce_arguments
-from plane_mcp.tools.registry import action_arguments
+from plane_mcp.tools.registry import action_arguments, alias_table
 
 logger = get_logger(__name__)
+
+
+def missing_action_error(tool: str, actions: Collection[str]) -> str:
+    """Error naming the actions `tool` offers, for a call that chose none."""
+    return f"Error: {tool} requires an action. It takes: {', '.join(sorted(actions))}."
 
 
 def stray_argument_error(action: str, arguments: dict, accepted: Collection[str]) -> str | None:
@@ -25,7 +31,7 @@ def stray_argument_error(action: str, arguments: dict, accepted: Collection[str]
 
 
 class ValidateActionArguments(Middleware):
-    """Refuse arguments the chosen action has no use for, before they are dropped."""
+    """Refuse a call whose action is absent, or whose arguments that action has no use for."""
 
     def __init__(self) -> None:
         self._accepted = action_arguments()
@@ -40,8 +46,23 @@ class ValidateActionArguments(Middleware):
     def rejection(self, tool: str, arguments: dict) -> str | None:
         """The message refusing this call, or None to let it through."""
         by_action = self._accepted.get(tool)
-        action = arguments.get("action")
-        if by_action is None or action not in by_action:
+        if by_action is None:
+            # A retired name, or not ours at all. Either way not our business.
+            return None
+        if "action" not in arguments:
+            if len(by_action) == 1:
+                # A single-operation tool takes no action parameter (its schema
+                # omits it), so there is nothing to choose: validate the
+                # arguments against its only action instead of demanding one.
+                ((action, accepted),) = by_action.items()
+                return stray_argument_error(action, arguments, accepted)
+            # Pydantic names the parameter but not one permitted value, so a caller
+            # that omitted the choice learns nothing it did not already know.
+            return missing_action_error(tool, by_action)
+        action = arguments["action"]
+        if action not in by_action:
+            # A present-but-wrong action is left alone: the Literal already reports
+            # the permitted set, and a second opinion here would only muddle it.
             return None
         return stray_argument_error(action, arguments, by_action[action])
 
@@ -91,15 +112,44 @@ class CoerceArguments(Middleware):
 
 
 class PlaneLoggingMiddleware(StructuredLoggingMiddleware):
-    """StructuredLoggingMiddleware that also records the tool name."""
+    """StructuredLoggingMiddleware that records which operation ran, not just which tool.
 
-    def _with_tool_name(self, context: MiddlewareContext, message: dict) -> dict:
-        if context.method == "tools/call":
-            message["tool"] = getattr(context.message, "name", "unknown")
-        return message
+    A dispatch tool's name is not its operation -- `workitem` covers 23 of them -- so
+    `resource` and `action` are recorded beside it, resolved through the alias table for
+    a retired name, which carries no `action` of its own. `resource` + `action` then
+    names one operation however it was reached, and `tool != resource` is exactly the
+    set of calls still arriving on a retired name.
+
+    `tool` keeps its previous meaning -- the name the caller used -- so dashboards built
+    on it keep counting the same thing. The two additions are additive, and they are on
+    the start record as well, which previously carried neither.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Built once; per record this is a dict lookup.
+        self._aliases = alias_table()
+
+    def _operation(self, context: MiddlewareContext) -> dict[str, str]:
+        """What the caller called, and which operation that is."""
+        if context.method != "tools/call":
+            return {}
+        name = getattr(context.message, "name", "unknown")
+        if alias := self._aliases.get(name):
+            resource, action = alias
+        else:
+            resource = name
+            action = (getattr(context.message, "arguments", None) or {}).get("action")
+        fields = {"tool": name, "resource": resource}
+        if action:
+            fields["action"] = action
+        return fields
+
+    def _create_before_message(self, context: MiddlewareContext, *args: Any, **kwargs: Any) -> dict:
+        return super()._create_before_message(context, *args, **kwargs) | self._operation(context)
 
     def _create_after_message(self, context: MiddlewareContext, start_time: float) -> dict:
-        return self._with_tool_name(context, super()._create_after_message(context, start_time))
+        return super()._create_after_message(context, start_time) | self._operation(context)
 
     def _create_error_message(self, context: MiddlewareContext, start_time: float, error: Exception) -> dict:
-        return self._with_tool_name(context, super()._create_error_message(context, start_time, error))
+        return super()._create_error_message(context, start_time, error) | self._operation(context)

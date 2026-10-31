@@ -7,7 +7,7 @@ work items, cycles, modules, releases, customers and more.
 Built on [FastMCP](https://github.com/jlowin/fastmcp) and the official
 [`plane-sdk`](https://pypi.org/project/plane-sdk/).
 
-- **28 tools**, one per Plane resource, covering 185 operations
+- **30 tools**, one per Plane resource, covering 209 operations
 - **Local or remote** — stdio, streamable HTTP, SSE
 - **OAuth or API key** authentication
 
@@ -98,7 +98,7 @@ HTTP transport instead.
 
 ## Tools
 
-The server advertises 28 tools, one per resource. Each takes an `action`
+The server advertises 30 tools, one per resource. Each takes an `action`
 parameter that selects the operation:
 
 ```python
@@ -173,11 +173,21 @@ steps): [docs/authentik-setup.md](docs/authentik-setup.md).** A ready-to-edit `d
 The remote transports carry credentials in the connection — the OAuth flow or the
 PAT headers — and need none of these.
 
+### Outbound proxy for attachment uploads
+
+`HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` (and their lowercase forms) are honored
+for the attachment-upload-from-URL fetch (`upload_from_url`). When a proxy
+applies to a given request, **the proxy — not this server — is that request's
+SSRF control**: the server does not pin or validate the target's resolved
+address itself, since the proxy connects to and resolves the target
+independently. Scope `NO_PROXY` and proxy egress policy accordingly.
+
 Self-hosting the server itself:
 
 | Variable | Purpose |
 |---|---|
 | `PLANE_INTERNAL_BASE_URL` | Internal URL for server-to-server calls, preferred over `PLANE_BASE_URL` |
+| `REDIS_URL` | OAuth token storage as one connection URL (`redis://` or `rediss://` for TLS); wins over host/port |
 | `REDIS_HOST` / `REDIS_PORT` | OAuth token storage; falls back to in-memory |
 | `PLANE_OAUTH_PROVIDER_*` | OAuth client credentials and base URL |
 | `MCP_PATH_PREFIX` | Path prefix for the HTTP routes, when mounted behind a proxy — `/plane` serves `/plane/http/mcp` |
@@ -203,7 +213,8 @@ Structured JSON. Each tool call logs its name, duration, status and — when
 available — an opaque user id and the workspace slug.
 
 ```bash
-export LOG_USER_INFO=true    # also log the display name (PII); default false
+export LOG_USER_INFO=false    # also log the display name (PII);
+export LOG_PAYLOADS=false    # keep request payloads out of logs; default true
 ```
 
 Only the OAuth and PAT transports carry a display name; stdio is unaffected.

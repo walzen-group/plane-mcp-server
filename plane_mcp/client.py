@@ -1,7 +1,7 @@
 """Plane client initialization for MCP server."""
 
 import os
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from fastmcp.exceptions import ToolError
 from fastmcp.server.auth.auth import AccessToken
@@ -63,6 +63,32 @@ def get_authenticated_sub() -> str | None:
     return claims.get("sub") or None
 
 
+def _workspace_slug(token: AccessToken | None) -> str:
+    """The slug a connection is bound to: its token's claim, else the environment."""
+    if token:
+        return token.claims.get("workspace_slug", "")
+    return os.getenv("PLANE_WORKSPACE_SLUG", "")
+
+
+def _connected_via(token: AccessToken | None) -> str:
+    """How a connection authenticated: its token's claim, else the environment."""
+    if token:
+        return token.claims.get("auth_method", "oauth")
+    return "environment"
+
+
+def current_workspace() -> dict[str, Any]:
+    """The workspace this connection is bound to, as far as its credentials say."""
+    token = get_access_token()
+    detail = (token.claims.get("workspace") if token else None) or {}
+    return {
+        "slug": _workspace_slug(token),
+        "id": detail.get("id"),
+        "name": detail.get("name"),
+        "connected_via": _connected_via(token),
+    }
+
+
 def get_plane_client_context() -> PlaneClientContext:
     """
     Initialize and return a PlaneClient instance with workspace context.
@@ -90,17 +116,17 @@ def get_plane_client_context() -> PlaneClientContext:
         ToolError: If an OIDC-authenticated user has not yet linked a Plane PAT.
     """
     base_url = os.getenv("PLANE_INTERNAL_BASE_URL") or os.getenv("PLANE_BASE_URL", "https://api.plane.so")
-    workspace_slug = os.getenv("PLANE_WORKSPACE_SLUG", "")
 
     api_key = os.getenv("PLANE_API_KEY", "")
     access_token = None
 
     # Get access token from the auth provider (which handles all auth methods)
     stored_access_token: AccessToken | None = get_access_token()
+    workspace_slug = _workspace_slug(stored_access_token)
     if stored_access_token:
         # Determine authentication method to use appropriate PlaneClient constructor
         claims = stored_access_token.claims
-        auth_method = claims.get("auth_method", "oauth")
+        auth_method = _connected_via(stored_access_token)
         token = stored_access_token.token
 
         if auth_method == "authentik_oidc":

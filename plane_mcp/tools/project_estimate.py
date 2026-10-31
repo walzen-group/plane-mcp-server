@@ -31,7 +31,12 @@ TYPES = ("categories", "points", "time")
 
 ACTIONS = (
     Action("retrieve", ("project_id",), note="a project has at most one estimate", read=True),
-    Action("create", ("project_id", "name"), ("type", "description", "last_used", "external_source", "external_id")),
+    Action(
+        "create",
+        ("project_id", "name"),
+        ("type", "description", "last_used", "external_source", "external_id"),
+        note="creates the estimate only; add its values afterwards with create_points",
+    ),
     Action("update", ("project_id",), ("name", "description", "external_source", "external_id")),
     Action("delete", ("project_id",), destructive=True),
     Action("link", ("project_id", "estimate_id"), note="makes that estimate the project's active one"),
@@ -93,7 +98,7 @@ def register(mcp: FastMCP) -> None:
         value: str = "",
         # Estimate point keys start at 0, so key cannot use the 0 sentinel.
         key: int | None = None,
-        last_used: bool = True,
+        last_used: bool | None = None,
         external_source: str = "",
         external_id: str = "",
     ) -> Estimate | EstimatePoint | list[EstimatePoint] | Project | str | None:
@@ -119,7 +124,7 @@ def register(mcp: FastMCP) -> None:
                     name=name,
                     type=opt(type),
                     description=opt(description),
-                    last_used=last_used,
+                    last_used=last_used is not False,
                     external_id=opt(external_id),
                     external_source=opt(external_source),
                 ),

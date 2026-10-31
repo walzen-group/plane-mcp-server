@@ -7,7 +7,6 @@ merging them teaches the model to filter on a field the API rejects.
 
 from __future__ import annotations
 
-from html import escape
 from typing import Annotated, Any, Literal, get_args
 
 from fastmcp import FastMCP
@@ -42,6 +41,7 @@ from plane_mcp.toolkit import (
     one_of,
     opt,
     pql_failure,
+    rich_text,
 )
 
 logger = get_logger(__name__)
@@ -147,6 +147,8 @@ FOOTER = (
     "resource first if you only have a name.\n"
     "description_stripped is plain text and is wrapped into HTML on save; description_html wins "
     "if both are given.\n"
+    "To clear a field on update: assignees=[] or labels=[], and start_date=null or "
+    "target_date=null. A field you leave out is not changed.\n"
     "fields is a sparse fieldset: use `project`, not project_id, and `description_html`, not "
     "description.\n"
     f"count group_by and sub_group_by accept: {', '.join(GROUP_BY_VALUES)}. These are grouping "
@@ -175,15 +177,6 @@ def _scoped_pql(pql: str, project_id: str) -> str:
         return pql
     scope = f'project = "{project_id}"'
     return f"({pql}) AND {scope}" if pql else scope
-
-
-def _description_html(description_html: str, description_stripped: str) -> str | None:
-    """Plane recomputes the stripped form server-side, so plain text must be wrapped."""
-    if description_html:
-        return description_html
-    if description_stripped:
-        return "<p>" + escape(description_stripped).replace("\n", "<br/>") + "</p>"
-    return None
 
 
 def register(mcp: FastMCP) -> None:
@@ -222,8 +215,8 @@ def register(mcp: FastMCP) -> None:
         description_html: str = "",
         description_stripped: str = "",
         priority: str = "",
-        start_date: str = "",
-        target_date: str = "",
+        start_date: str | None = "",
+        target_date: str | None = "",
         sort_order: float = 0,
         parent: str = "",
         state: str = "",
@@ -241,7 +234,7 @@ def register(mcp: FastMCP) -> None:
         per_page: int = 0,
         # Tri-state: False publishes a draft, unset leaves the flag alone.
         is_draft: bool | None = None,
-        archive: bool = True,
+        archive: bool | None = None,
     ) -> WorkItem | WorkItemDetail | WorkItemSearch | dict[str, Any] | list[Any] | str | None:
         client, workspace_slug = get_plane_client_context()
 
@@ -262,13 +255,14 @@ def register(mcp: FastMCP) -> None:
             )
 
         def write_payload() -> dict[str, Any]:
-            return {
+            """The fields the caller supplied, and no others."""
+            payload = {
                 "name": opt(name),
                 "assignees": coerce_list(assignees),
                 "labels": coerce_list(labels),
                 "type_id": opt(type_id),
                 "point": opt(point),
-                "description_html": _description_html(description_html, description_stripped),
+                "description_html": rich_text(description_html, description_stripped),
                 "priority": opt(priority),
                 "start_date": opt(start_date),
                 "target_date": opt(target_date),
@@ -280,6 +274,9 @@ def register(mcp: FastMCP) -> None:
                 "state": opt(state),
                 "estimate_point": opt(estimate_point),
             }
+            supplied = {field: value for field, value in payload.items() if value is not None}
+            dates = {"start_date": start_date, "target_date": target_date}
+            return supplied | {field: None for field, value in dates.items() if value is None}
 
         if action in ("list", "list_archived"):
             if action == "list_archived" and not project_id:
@@ -385,9 +382,10 @@ def register(mcp: FastMCP) -> None:
             return None
 
         if action == "archive":
-            operation = client.work_items.archive if archive else client.work_items.unarchive
+            archiving = archive is not False
+            operation = client.work_items.archive if archiving else client.work_items.unarchive
             operation(workspace_slug=workspace_slug, project_id=project_id, work_item_id=workitem_id)
-            return {"workitem_id": workitem_id, "archived": archive}
+            return {"workitem_id": workitem_id, "archived": archiving}
 
         # manage_assignee / manage_label: read the current set, mutate it, write it back.
         add, remove, field = (
