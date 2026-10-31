@@ -38,6 +38,9 @@ DEFAULT_ALLOWED_REDIRECT_URIS = [
     # ChatGPT connectors — per-connector callback + legacy redirect
     "https://chatgpt.com/connector/oauth/*",
     "https://chatgpt.com/connector_platform_oauth_redirect",
+    # Gemini custom apps (Spark) — the path carries a per-user, per-connector id
+    "https://oauth-redirect.googleusercontent.com/r/*",
+    "https://grok.com/connectors-oauth-exchange-code/",
 ]
 
 
@@ -53,9 +56,12 @@ def get_allowed_client_redirect_uris() -> list[str]:
     return allowed
 
 
+LOG_PAYLOADS = os.getenv("LOG_PAYLOADS", "true").lower() == "true"
+
+
 def _configured(mcp: FastMCP) -> FastMCP:
     """The middleware stack and tools every transport shares."""
-    mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=True))
+    mcp.add_middleware(PlaneLoggingMiddleware(include_payloads=LOG_PAYLOADS))
     mcp.add_middleware(CoerceArguments())
     mcp.add_middleware(ValidateActionArguments())
     register_tools(mcp)

@@ -1,15 +1,16 @@
-"""Workspace-level feature flags, and which workspace the caller acts in."""
+"""The connected workspace, its feature flags, and which workspace the caller acts in."""
 
 from __future__ import annotations
 
-from typing import Literal
+import os
+from typing import Any, Literal
 
 from fastmcp import FastMCP
 from plane.models.query_params import MemberListQueryParams
 from plane.models.workspaces import WorkspaceFeature
 from pydantic import BaseModel, Field
 
-from plane_mcp.client import get_authenticated_sub, get_plane_client_context
+from plane_mcp.client import current_workspace, get_authenticated_sub, get_plane_client_context
 from plane_mcp.pat_store import get_pat_store
 from plane_mcp.toolkit import Action, build_annotations, build_description, missing
 
@@ -30,6 +31,12 @@ class ActiveWorkspace(BaseModel):
 
 
 ACTIONS = (
+    Action(
+        "retrieve",
+        note="the workspace this connection is bound to: slug, id, name and how it connected. "
+        "id and name are known only on an OAuth connection and are null otherwise",
+        read=True,
+    ),
     Action("get_features", note="feature flags for the current workspace", read=True),
     Action(
         "update_features",
@@ -62,12 +69,12 @@ def register(mcp: FastMCP) -> None:
     @mcp.tool(
         name=NAME,
         description=build_description(
-            "Workspace-level feature flags, and which workspace you act in.", ACTIONS, FOOTER
+            "The connected workspace, its feature flags, and which workspace you act in.", ACTIONS, FOOTER
         ),
         annotations=build_annotations(TITLE, ACTIONS),
     )
     def workspace(
-        action: Literal["get_features", "update_features", "get_active", "set_active"],
+        action: Literal["retrieve", "get_features", "update_features", "get_active", "set_active"],
         # Tri-state throughout: False disables a feature, unset leaves it alone.
         project_grouping: bool | None = None,
         initiatives: bool | None = None,
@@ -76,7 +83,15 @@ def register(mcp: FastMCP) -> None:
         wiki: bool | None = None,
         pi: bool | None = None,
         workspace_slug: str | None = None,
-    ) -> WorkspaceFeature | ActiveWorkspace | str:
+    ) -> WorkspaceFeature | ActiveWorkspace | dict[str, Any] | str:
+        if action == "retrieve":
+            info = current_workspace()
+            # Per-user workspace switching: an OIDC caller's slug lives in the PAT
+            # store, not in its token, so report the one tools actually act in.
+            if (sub := get_authenticated_sub()) is not None:
+                info["slug"] = get_pat_store().get_workspace(sub) or os.getenv("PLANE_WORKSPACE_SLUG", "")
+            return info
+
         client, active_slug = get_plane_client_context()
 
         if action == "get_features":
